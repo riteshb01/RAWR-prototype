@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    @apply bg-gray-900 text-gray-200 font-mono;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    @apply font-bold text-gray-100;
+}
+
+a {
+    @apply text-blue-400 hover:text-blue-300;
+}
+
+button {
+    @apply bg-blue-600 text-white font-semibold py-2 px-4 rounded;
+}
+
+.card {
+    @apply bg-gray-800 border border-gray-700 rounded-lg p-4 shadow-md;
+}
+
+.table {
+    @apply min-w-full divide-y divide-gray-700;
+}
+
+.table th, .table td {
+    @apply px-6 py-3 text-left text-sm font-medium text-gray-300;
+}
+
+.table th {
+    @apply bg-gray-700;
+}
+
+.table tr:hover {
+    @apply bg-gray-700;
+}
+
+.alert {
+    @apply p-4 mb-4 border rounded;
+}
+
+.alert-error {
+    @apply bg-red-500 text-white;
+}
+
+.alert-warning {
+    @apply bg-yellow-500 text-black;
+}
+
+.alert-success {
+    @apply bg-green-500 text-white;
+}
