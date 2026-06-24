@@ -1,27 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getDashboardData } from '../services/api';
 
+/**
+ * Fetches the main dashboard summary from /dashboard/.
+ *
+ * Returns:
+ *   data  — { total_courses, total_events, total_conflicts, critical_weeks,
+ *             upcoming_events[], recent_conflicts[], heatmap_data{} }
+ *   isLoading — boolean
+ *   error     — Error | null
+ */
 export function useWorkloadData() {
-  const [workloadData, setWorkloadData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['dashboardData'],
+    queryFn: getDashboardData,
+  });
 
-  useEffect(() => {
-    const fetchWorkloadData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getDashboardData();
-        setWorkloadData(data);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchWorkloadData();
-  }, []);
-
-  return { workloadData, loading, error };
+  return { data: data ?? null, isLoading, error };
 }
