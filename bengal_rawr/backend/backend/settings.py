@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     # Third party
     'rest_framework',
     'corsheaders',
+    'pgvector.django',
     # Local apps
     'apps.syllabus',
 ]
@@ -63,22 +64,14 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # Database
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('DB_NAME', 'bengal_rawr'),
+        'USER': os.environ.get('DB_USER', ''),
+        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
-
-# For production, use PostgreSQL:
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': os.environ.get('DB_NAME', 'bengal_rawr'),
-#         'USER': os.environ.get('DB_USER', 'postgres'),
-#         'PASSWORD': os.environ.get('DB_PASSWORD', ''),
-#         'HOST': os.environ.get('DB_HOST', 'localhost'),
-#         'PORT': os.environ.get('DB_PORT', '5432'),
-#     }
-# }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -134,6 +127,10 @@ ALLOWED_UPLOAD_EXTENSIONS = ['.pdf', '.txt', '.docx']
 
 # NLP / Event parser settings
 CONFLICT_WEIGHT_THRESHOLD = 7  # Workload threshold per week
+
+# Embedding model settings (for pgvector semantic search)
+EMBEDDING_MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
+EMBEDDING_DIMENSIONS = 384  # Output dimensions for all-MiniLM-L6-v2
 
 WORKLOAD_WEIGHTS = {
     'homework': 1,

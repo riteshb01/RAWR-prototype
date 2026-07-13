@@ -1,29 +1,17 @@
-### Python
-__pycache__/
-*.py[cod]
-*.pyd
-.Python
-.venv/
 venv/
-ENV/
-env/
-.env
-.env.*
-
-### Django
-*.log
+__pycache__/
+*.pyc
+*.pyo
 db.sqlite3
+*.sqlite3
 media/
 staticfiles/
-
-### Node / React
+logs/
+*.log
+.env
 node_modules/
 build/
-.cache/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-### macOS
+dist/
 .DS_Store
-
+backend/core/event_classifier/trained_model.pkl
+backend/core/event_classifier/vectorizer.pkl

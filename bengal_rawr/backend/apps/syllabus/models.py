@@ -182,3 +182,28 @@ class AnalysisSession(models.Model):
 
     def __str__(self):
         return f"Analysis #{self.pk} — {self.get_status_display()} ({self.total_events} events)"
+
+
+# ─────────────────────────────────────────────
+# Vector Embeddings (pgvector)
+# ─────────────────────────────────────────────
+
+class SyllabusEmbedding(models.Model):
+    """Stores vector embeddings of syllabus text chunks for semantic search."""
+    from pgvector.django import VectorField
+
+    syllabus = models.ForeignKey(SyllabusFile, on_delete=models.CASCADE, related_name='embeddings')
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='embeddings')
+    chunk_text = models.TextField(help_text="The original text chunk")
+    chunk_index = models.IntegerField(default=0, help_text="Position of this chunk in the document")
+    embedding = VectorField(dimensions=384, help_text="384-dim embedding vector")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['syllabus', 'chunk_index']
+        indexes = [
+            models.Index(fields=['course']),
+        ]
+
+    def __str__(self):
+        return f"Chunk {self.chunk_index} of {self.syllabus.original_filename}"

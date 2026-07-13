@@ -14,7 +14,7 @@ from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
-from apps.syllabus.models import Course, SyllabusFile, Event, ConflictWeek, AnalysisSession
+from apps.syllabus.models import Course, SyllabusFile, Event, ConflictWeek, AnalysisSession, SyllabusEmbedding
 from apps.syllabus.serializers import (
     CourseSerializer, SyllabusUploadSerializer, SyllabusFileSerializer,
     EventSerializer, ConflictWeekSerializer, AnalysisSessionSerializer,
@@ -52,6 +52,28 @@ def _run_full_pipeline(syllabus_file: SyllabusFile) -> dict:
 
         syllabus_file.extracted_text = extracted_text[:50000]  # Cap stored text
         syllabus_file.save(update_fields=['extracted_text'])
+
+        # Step 1b — Generate and store vector embeddings (non-blocking)
+        try:
+            from core.embeddings.service import get_embedding_service
+            embedding_service = get_embedding_service()
+            chunks = embedding_service.chunk_and_embed(extracted_text)
+
+            SyllabusEmbedding.objects.filter(syllabus=syllabus_file).delete()
+            embeddings_to_create = [
+                SyllabusEmbedding(
+                    syllabus=syllabus_file,
+                    course=course,
+                    chunk_text=chunk['text'],
+                    chunk_index=idx,
+                    embedding=chunk['embedding'],
+                )
+                for idx, chunk in enumerate(chunks)
+            ]
+            SyllabusEmbedding.objects.bulk_create(embeddings_to_create)
+            logger.info(f"Stored {len(embeddings_to_create)} embeddings for syllabus {syllabus_file.pk}")
+        except Exception as e:
+            logger.warning(f"Embedding generation failed (non-fatal): {e}")
 
         # Step 2 — NLP event extraction
         course = syllabus_file.course
@@ -516,3 +538,45 @@ class WeeklyWorkloadView(APIView):
             'weekly_workload': result,
             'threshold': threshold,
         })
+
+
+# ─────────────────────────────────────────────────────────
+# Semantic Search (pgvector)
+# ─────────────────────────────────────────────────────────
+
+class SemanticSearchView(APIView):
+    """
+    GET /api/search/?q=<query>&course_id=<optional>
+    Performs semantic (vector similarity) search across stored syllabus embeddings.
+    """
+
+    def get(self, request):
+        query = request.query_params.get('q', '').strip()
+        if not query:
+            return Response(
+                {'error': 'Query parameter "q" is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        course_id = request.query_params.get('course_id')
+        limit = min(int(request.query_params.get('limit', 5)), 20)
+
+        try:
+            from core.embeddings.service import get_embedding_service
+            service = get_embedding_service()
+            results = service.search(
+                query=query,
+                course_id=int(course_id) if course_id else None,
+                limit=limit,
+            )
+            return Response({
+                'query': query,
+                'count': len(results),
+                'results': results,
+            })
+        except Exception as e:
+            logger.exception(f"Semantic search failed: {e}")
+            return Response(
+                {'error': 'Semantic search is not available. Embeddings may not be generated yet.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )

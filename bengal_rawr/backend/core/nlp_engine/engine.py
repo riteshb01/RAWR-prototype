@@ -1,7 +1,5 @@
 """
-Bengal RAWR — NLP Engine
-Core module for extracting academic events from syllabus text.
-Uses spaCy + regex + keyword heuristics. No external AI APIs.
+Core module for extracting academic events from syllabus text
 """
 
 import re
@@ -13,9 +11,9 @@ import dateparser
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────
+
 # Event keyword taxonomy with weights
-# ─────────────────────────────────────────────
+
 EVENT_KEYWORDS = {
     'homework': {
         'keywords': ['homework', 'hw', 'take-home', 'take home'],
@@ -46,7 +44,7 @@ EVENT_KEYWORDS = {
         'weight': 5,
     },
     'final': {
-        'keywords': ['final', 'final exam', 'finals', 'comprehensive exam'],
+        'keywords': ['final', 'final exam', 'finals', 'comprehensive exam', 'CEP week', 'cep week'],
         'weight': 8,
     },
     'lab': {
@@ -59,9 +57,8 @@ EVENT_KEYWORDS = {
     },
 }
 
-# ─────────────────────────────────────────────
 # Date patterns covering most syllabus formats
-# ─────────────────────────────────────────────
+
 DATE_PATTERNS = [
     # ISO: 2026-03-12
     r'\b(\d{4}-\d{2}-\d{2})\b',
@@ -189,16 +186,81 @@ def extract_event_title(line: str, event_type: str) -> str:
     return title[:120]
 
 
+# ─────────────────────────────────────────────
+# Grade percentage extraction
+# ─────────────────────────────────────────────
+
+# Matches patterns like: 25%, (25%), worth 25%, = 25%, : 25%
+# Captures the numeric value; validates range 1–100.
+GRADE_PERCENTAGE_REGEX = re.compile(
+    r'(?:worth|counts?\s+(?:for|as)|=|:|\()?\s*(\d{1,3}(?:\.\d+)?)\s*%',
+    re.IGNORECASE,
+)
+
+
+def extract_grade_percentage(line: str) -> Optional[float]:
+    """
+    Extract a grading percentage from a syllabus line.
+
+    Looks for patterns like:
+        "Midterm Exam — 25%"
+        "Homework (10% of final grade)"
+        "Final Exam: worth 40%"
+
+    Returns the percentage as a float (e.g. 25.0), or None if not found.
+    Only values in the range [1, 100] are accepted to filter false positives
+    (e.g. slide numbers, chapter references).
+    """
+    matches = GRADE_PERCENTAGE_REGEX.findall(line)
+    for match in matches:
+        try:
+            pct = float(match)
+            if 1.0 <= pct <= 100.0:
+                return pct
+        except ValueError:
+            continue
+    return None
+
+
+def grade_percentage_to_weight(percentage: float) -> float:
+    """
+    Convert a grade percentage to the internal workload weight scale (1–8).
+
+    Scaling: weight = percentage / 5
+        5%  → 1.0  (matches 'homework'  default)
+        10% → 2.0  (matches 'quiz'      default)
+        25% → 5.0  (matches 'midterm'   default)
+        40% → 8.0  (matches 'final'     default)
+
+    Result is clamped to [0.5, 10.0] to handle edge cases.
+    """
+    weight = round(percentage / 5, 1)
+    return max(0.5, min(weight, 10.0))
+
+
+# Minimum ML confidence required to accept a classifier prediction.
+# Lines where the top label confidence is below this are treated as non-events.
+ML_CONFIDENCE_THRESHOLD = 0.65
+
+
 class SyllabusNLPEngine:
     """
     Main NLP engine that processes raw syllabus text and returns
     structured academic event records.
+
+    Detection strategy (two-pass per line):
+      1. Keyword heuristics via detect_event_type()  — fast, high precision
+      2. ML classifier fallback                      — catches lines keywords miss
+         (only if confidence >= ML_CONFIDENCE_THRESHOLD)
     """
 
-    def __init__(self, reference_year: int = None):
+    def __init__(self, reference_year: int = None, use_classifier: bool = True):
         self.reference_year = reference_year or datetime.now().year
         self.spacy_nlp = None
+        self.classifier = None
         self._try_load_spacy()
+        if use_classifier:
+            self._try_load_classifier()
 
     def _try_load_spacy(self):
         """Attempt to load spaCy model; degrade gracefully if unavailable."""
@@ -209,6 +271,16 @@ class SyllabusNLPEngine:
         except Exception as e:
             logger.warning(f"spaCy not available, using regex-only mode: {e}")
             self.spacy_nlp = None
+
+    def _try_load_classifier(self):
+        """Load the ML event classifier singleton; degrade gracefully if unavailable."""
+        try:
+            from core.event_classifier.classifier import get_classifier
+            self.classifier = get_classifier()
+            logger.info("ML classifier loaded into NLP engine")
+        except Exception as e:
+            logger.warning(f"ML classifier unavailable, keyword-only mode active: {e}")
+            self.classifier = None
 
     def _spacy_extract_dates(self, text: str) -> list:
         """Use spaCy NER to extract DATE entities for a higher recall pass."""
@@ -230,7 +302,10 @@ class SyllabusNLPEngine:
 
         Returns:
             List of dicts with keys:
-                course, event_type, title, date, weight, raw_line
+                course, event_type, title, date, weight, raw_line, source
+            Optional keys (present when data is available):
+                ml_confidence    — float, only on ML-sourced events
+                grade_percentage — float, only when a % was found on the line
         """
         if not text or not text.strip():
             logger.warning("Empty text passed to NLP engine")
@@ -244,8 +319,28 @@ class SyllabusNLPEngine:
             if not line or len(line) < 5:
                 continue
 
-            # Step 1: Detect event type
+            # Step 1: Detect event type via keyword heuristics
             event_info = detect_event_type(line)
+
+            # Step 1b: ML classifier fallback — only fires when keywords miss
+            if event_info is None and self.classifier:
+                ml_label = self.classifier.predict(line)
+                if ml_label:
+                    proba = self.classifier.predict_proba(line)
+                    confidence = proba.get(ml_label, 0.0)
+                    if confidence >= ML_CONFIDENCE_THRESHOLD:
+                        event_info = {
+                            'event_type': ml_label,
+                            'weight': 1,  # conservative weight for ML-sourced hits
+                            'matched_keyword': None,
+                            'ml_confidence': round(confidence, 3),
+                            'source': 'ml_classifier',
+                        }
+                        logger.debug(
+                            f"ML classifier caught line (label={ml_label}, "
+                            f"confidence={confidence:.2f}): {line[:80]}"
+                        )
+
             if not event_info:
                 continue
 
@@ -261,30 +356,60 @@ class SyllabusNLPEngine:
                         break
 
             # Step 4: Produce event record for each date found
+            ml_confidence = event_info.get('ml_confidence')  # None for keyword hits
+            detection_source = event_info.get('source', 'keyword')
+
+            # Step 4a: Check for an explicit grade percentage on this line.
+            # If found, override the default type-based weight with a
+            # percentage-derived weight so a 5% quiz and a 40% final are
+            # treated proportionally, not identically.
+            grade_pct = extract_grade_percentage(line)
+            final_weight = (
+                grade_percentage_to_weight(grade_pct)
+                if grade_pct is not None
+                else event_info['weight']
+            )
+            if grade_pct is not None:
+                logger.debug(
+                    f"Grade % found ({grade_pct}%) on line → weight={final_weight}: {line[:80]}"
+                )
+
             if dates_found:
                 for raw_date_str, parsed_date in dates_found:
                     title = extract_event_title(line, event_info['event_type'])
-                    events.append({
+                    event_dict = {
                         'course': course_name,
                         'event_type': event_info['event_type'],
                         'title': title,
                         'date': parsed_date,
-                        'weight': event_info['weight'],
+                        'weight': final_weight,
                         'matched_keyword': event_info['matched_keyword'],
+                        'source': detection_source,
                         'raw_line': line[:300],
-                    })
+                    }
+                    if ml_confidence is not None:
+                        event_dict['ml_confidence'] = ml_confidence
+                    if grade_pct is not None:
+                        event_dict['grade_percentage'] = grade_pct
+                    events.append(event_dict)
             else:
                 # Record event without a date (still useful for warnings)
                 title = extract_event_title(line, event_info['event_type'])
-                events.append({
+                event_dict = {
                     'course': course_name,
                     'event_type': event_info['event_type'],
                     'title': title,
                     'date': None,
-                    'weight': event_info['weight'],
+                    'weight': final_weight,
                     'matched_keyword': event_info['matched_keyword'],
+                    'source': detection_source,
                     'raw_line': line[:300],
-                })
+                }
+                if ml_confidence is not None:
+                    event_dict['ml_confidence'] = ml_confidence
+                if grade_pct is not None:
+                    event_dict['grade_percentage'] = grade_pct
+                events.append(event_dict)
 
         # Deduplicate events on same date with same type
         events = self._deduplicate_events(events)

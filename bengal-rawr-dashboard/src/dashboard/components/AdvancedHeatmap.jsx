@@ -1,134 +1,183 @@
-import React, { useState } from 'react';
+import React from 'react';
 
-// Mock data for Categorical Heatmap
-const catData = {
-  weeks: ["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8"],
-  categories: [
-    { name: "Exams", values: [0, 0, 1, 0, 2, 0, 0, 3] },
-    { name: "Projects", values: [0, 0, 0, 1, 0, 2, 1, 2] },
-    { name: "Homework", values: [3, 4, 3, 4, 3, 2, 3, 1] },
-    { name: "Reading", values: [5, 4, 4, 3, 2, 2, 1, 0] }
-  ]
-};
-
-// Mock data for Hourly Heatmap (Days vs Hours)
-const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const hours = ["8am", "10am", "12pm", "2pm", "4pm", "6pm", "8pm", "10pm"];
-const hourlyData = hours.map(() => days.map(() => Math.floor(Math.random() * 4)));
-
-const getIntensityColor = (val, max) => {
-  if (val === 0) return 'var(--bg)';
+/**
+ * Returns a smooth gradient colour from green → amber → red 
+ * based on ratio (0–1). Zero returns transparent.
+ */
+const getGradientColor = (val, max) => {
+  if (val === 0 || max === 0) return 'transparent';
   const ratio = val / max;
-  if (ratio > 0.6) return 'var(--danger)';
-  if (ratio > 0.3) return 'var(--warn)';
-  return 'var(--accent)';
+  // green(142°) → amber(36°) → red(0°)
+  const hue = ratio <= 0.5
+    ? 142 - (142 - 36) * (ratio / 0.5)   // green → amber
+    : 36 - 36 * ((ratio - 0.5) / 0.5);     // amber → red
+  const sat = 70 + ratio * 15;              // slightly more vivid as intensity grows
+  const light = 50 - ratio * 10;            // slightly darker at peak
+  return `hsl(${Math.round(hue)}, ${Math.round(sat)}%, ${Math.round(light)}%)`;
 };
 
-const AdvancedHeatmap = () => {
-  const [view, setView] = useState('categorical');
+/**
+ * A single bubble cell.
+ *  - Size scales from 28% → 92% of the cell based on intensity.
+ *  - Shows the numeric value inside.
+ *  - Empty cells render as a subtle dashed ring.
+ */
+const BubbleCell = ({ value, max, label }) => {
+  const isEmpty = value === 0;
+  const ratio = max > 0 ? value / max : 0;
+
+  // Circle diameter as a % of cell size (min 28%, max 92%)
+  const sizePct = isEmpty ? 28 : 28 + ratio * 64;
+  const bg = getGradientColor(value, max);
+  // Ensure text is readable on the coloured background
+  const textColor = ratio > 0.45 ? '#fff' : 'var(--ink-2)';
+
+  return (
+    <div
+      title={label}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '48px',
+        width: '100%',
+        position: 'relative',
+      }}
+    >
+      <div
+        style={{
+          width: `${sizePct}%`,
+          aspectRatio: '1',
+          maxWidth: '44px',
+          maxHeight: '44px',
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: isEmpty ? 'none' : bg,
+          border: isEmpty
+            ? '1.5px dashed var(--border)'
+            : `2px solid ${bg}`,
+          boxShadow: isEmpty
+            ? 'none'
+            : `0 2px 8px ${bg}44`,
+          transition: 'all 0.25s ease',
+          cursor: isEmpty ? 'default' : 'pointer',
+        }}
+      >
+        <span
+          style={{
+            fontSize: isEmpty ? '0.55rem' : ratio > 0.5 ? '0.85rem' : '0.72rem',
+            fontWeight: isEmpty ? 400 : 700,
+            color: isEmpty ? 'var(--ink-4)' : textColor,
+            lineHeight: 1,
+            fontVariantNumeric: 'tabular-nums',
+            userSelect: 'none',
+          }}
+        >
+          {isEmpty ? '–' : value}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * A legend bar showing the gradient scale.
+ */
+const GradientLegend = ({ low = 'Low', high = 'High' }) => (
+  <div style={{
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.5rem',
+    marginTop: '1.25rem',
+    fontSize: '0.65rem',
+    color: 'var(--ink-3)',
+    fontWeight: 500,
+  }}>
+    <span>{low}</span>
+    <div style={{
+      width: '120px',
+      height: '8px',
+      borderRadius: '4px',
+      background: 'linear-gradient(to right, hsl(142,70%,50%), hsl(36,78%,47%), hsl(0,85%,40%))',
+    }} />
+    <span>{high}</span>
+  </div>
+);
+
+/**
+ * Advanced Workload Matrix (Categorical Heatmap)
+ * Expected prop: categoricalData = { weeks: [], categories: [{name: "", values: []}] }
+ */
+const AdvancedHeatmap = ({ categoricalData }) => {
+  if (!categoricalData || !categoricalData.categories || categoricalData.categories.length === 0) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--ink-3)' }}>
+        No workload data available.
+      </div>
+    );
+  }
+
+  // Compute global max for the view to scale the circles properly
+  const catMax = Math.max(...categoricalData.categories.flatMap(c => c.values));
 
   return (
     <div style={{ width: '100%' }}>
-      {/* Toggle */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2rem' }}>
-        <div style={{ display: 'inline-flex', background: 'var(--bg-subtle)', borderRadius: '8px', padding: '4px' }}>
-          <button 
-            onClick={() => setView('categorical')}
-            style={{ 
-              padding: '0.5rem 1rem', 
-              fontSize: '0.8rem', 
-              fontWeight: 600, 
-              border: 'none', 
-              borderRadius: '6px',
-              cursor: 'pointer',
-              background: view === 'categorical' ? 'var(--bg-card)' : 'transparent',
-              color: view === 'categorical' ? 'var(--ink)' : 'var(--ink-3)',
-              boxShadow: view === 'categorical' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-            }}
-          >
-            By Event Type
-          </button>
-          <button 
-            onClick={() => setView('hourly')}
-            style={{ 
-              padding: '0.5rem 1rem', 
-              fontSize: '0.8rem', 
-              fontWeight: 600, 
-              border: 'none', 
-              borderRadius: '6px',
-              cursor: 'pointer',
-              background: view === 'hourly' ? 'var(--bg-card)' : 'transparent',
-              color: view === 'hourly' ? 'var(--ink)' : 'var(--ink-3)',
-              boxShadow: view === 'hourly' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-            }}
-          >
-            Hourly Deep Study
-          </button>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `90px repeat(${categoricalData.weeks.length}, 1fr)`,
+          gap: '2px',
+          minWidth: '540px',
+        }}>
+          {/* Header row */}
+          <div />
+          {categoricalData.weeks.map(w => (
+            <div key={w} style={{
+              textAlign: 'center',
+              fontSize: '0.7rem',
+              color: 'var(--ink-4)',
+              fontWeight: 600,
+              paddingBottom: '0.5rem',
+            }}>
+              {w}
+            </div>
+          ))}
+
+          {/* Data rows */}
+          {categoricalData.categories.map(cat => (
+            <React.Fragment key={cat.name}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                color: 'var(--ink-2)',
+                paddingRight: '0.5rem',
+                textTransform: 'capitalize',
+              }}>
+                {cat.name}
+              </div>
+              {cat.values.map((val, colIdx) => (
+                <BubbleCell
+                  key={colIdx}
+                  value={val}
+                  max={catMax}
+                  label={`${cat.name} in ${categoricalData.weeks[colIdx]}: ${val} weight`}
+                />
+              ))}
+            </React.Fragment>
+          ))}
         </div>
+
+        <GradientLegend low="0 workload" high={`${catMax} workload`} />
+
+        <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--ink-3)', marginTop: '1rem' }}>
+          This view helps you understand <strong>what kind of work</strong> is piling up. Notice how some task types drop off when Exams pick up.
+        </p>
       </div>
-
-      {/* Categorical View */}
-      {view === 'categorical' && (
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '80px repeat(8, 1fr)', gap: '4px', minWidth: '500px' }}>
-            <div /> {/* Empty top-left */}
-            {catData.weeks.map(w => <div key={w} style={{ textAlign: 'center', fontSize: '0.7rem', color: 'var(--ink-4)', fontWeight: 600 }}>{w}</div>)}
-            
-            {catData.categories.map((cat, rowIdx) => (
-              <React.Fragment key={cat.name}>
-                <div style={{ display: 'flex', alignItems: 'center', fontSize: '0.75rem', fontWeight: 600, color: 'var(--ink-2)' }}>{cat.name}</div>
-                {cat.values.map((val, colIdx) => (
-                  <div 
-                    key={`${rowIdx}-${colIdx}`}
-                    title={`${cat.name} in ${catData.weeks[colIdx]}: ${val} events`}
-                    style={{ 
-                      height: '32px', 
-                      backgroundColor: getIntensityColor(val, 5),
-                      borderRadius: '4px',
-                      border: '1px solid var(--border)',
-                      opacity: val === 0 ? 0.3 : 1
-                    }} 
-                  />
-                ))}
-              </React.Fragment>
-            ))}
-          </div>
-          <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--ink-3)', marginTop: '1.5rem' }}>
-            This view helps you understand <strong>what kind of work</strong> is piling up. Notice how Reading drops off when Exams pick up.
-          </p>
-        </div>
-      )}
-
-      {/* Hourly View */}
-      {view === 'hourly' && (
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)', gap: '4px', minWidth: '500px' }}>
-            <div />
-            {days.map(d => <div key={d} style={{ textAlign: 'center', fontSize: '0.7rem', color: 'var(--ink-4)', fontWeight: 600 }}>{d}</div>)}
-            
-            {hours.map((h, rowIdx) => (
-              <React.Fragment key={h}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: '8px', fontSize: '0.65rem', color: 'var(--ink-3)' }}>{h}</div>
-                {hourlyData[rowIdx].map((val, colIdx) => (
-                  <div 
-                    key={`${rowIdx}-${colIdx}`}
-                    style={{ 
-                      height: '24px', 
-                      backgroundColor: val > 0 ? 'var(--ink)' : 'var(--bg)',
-                      opacity: val > 0 ? (val * 0.3) : 1,
-                      borderRadius: '4px',
-                      border: '1px solid var(--border)'
-                    }} 
-                  />
-                ))}
-              </React.Fragment>
-            ))}
-          </div>
-          <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--ink-3)', marginTop: '1.5rem' }}>
-            This view maps out the <strong>deep study blocks</strong> you'll need to survive a heavy week.
-          </p>
-        </div>
-      )}
     </div>
   );
 };

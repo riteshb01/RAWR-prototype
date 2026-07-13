@@ -5,6 +5,7 @@ from apps.syllabus.views import (
     EventListView, EventDetailView, VerifyEventView,
     ConflictListView, RunConflictAnalysisView,
     DashboardSummaryView, HeatmapDataView, WeeklyWorkloadView,
+    SemanticSearchView,
 )
 urlpatterns = [
     path('courses/', CourseListCreateView.as_view()),
@@ -19,4 +20,5 @@ urlpatterns = [
     path('dashboard/', DashboardSummaryView.as_view()),
     path('dashboard/heatmap/', HeatmapDataView.as_view()),
     path('dashboard/weekly-workload/', WeeklyWorkloadView.as_view()),
+    path('search/', SemanticSearchView.as_view()),
 ]
