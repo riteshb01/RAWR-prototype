@@ -188,15 +188,24 @@ class AnalysisSession(models.Model):
 # Vector Embeddings (pgvector)
 # ─────────────────────────────────────────────
 
+try:
+    from pgvector.django import VectorField as _VectorField
+    _EmbeddingField = _VectorField(dimensions=384, help_text="384-dim embedding vector")
+except ImportError:
+    # Fallback for SQLite / environments without pgvector
+    _EmbeddingField = models.TextField(
+        blank=True, default='', help_text="384-dim embedding vector (pgvector unavailable, stored as text)"
+    )
+
+
 class SyllabusEmbedding(models.Model):
     """Stores vector embeddings of syllabus text chunks for semantic search."""
-    from pgvector.django import VectorField
 
     syllabus = models.ForeignKey(SyllabusFile, on_delete=models.CASCADE, related_name='embeddings')
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='embeddings')
     chunk_text = models.TextField(help_text="The original text chunk")
     chunk_index = models.IntegerField(default=0, help_text="Position of this chunk in the document")
-    embedding = VectorField(dimensions=384, help_text="384-dim embedding vector")
+    embedding = _EmbeddingField
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -207,3 +216,4 @@ class SyllabusEmbedding(models.Model):
 
     def __str__(self):
         return f"Chunk {self.chunk_index} of {self.syllabus.original_filename}"
+
