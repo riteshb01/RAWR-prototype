@@ -5,3 +5,11 @@ dist/
 __pycache__/
 venv/
 .env
+*.log
+logs/
+mnt/
+*.docx
+*.pdf
+SyllabusProject/
+implementation.md
+final/
